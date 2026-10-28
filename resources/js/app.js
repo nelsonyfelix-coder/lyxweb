@@ -36,3 +36,21 @@ filterButtons.forEach((button) => {
         });
     });
 });
+
+const coverImageInput = document.querySelector('[data-cover-image-input]');
+const coverImagePreview = document.querySelector('[data-cover-image-preview]');
+let coverPreviewObjectUrl;
+
+if (coverImageInput && coverImagePreview) {
+    coverImageInput.addEventListener('change', () => {
+        const file = coverImageInput.files?.[0];
+
+        if (!file) return;
+
+        if (coverPreviewObjectUrl) URL.revokeObjectURL(coverPreviewObjectUrl);
+        coverPreviewObjectUrl = URL.createObjectURL(file);
+        coverImagePreview.src = coverPreviewObjectUrl;
+        coverImagePreview.closest('.admin-cover-preview').hidden = false;
+    });
+}
+

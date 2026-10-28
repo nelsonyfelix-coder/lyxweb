@@ -77,9 +77,9 @@
         </div>
         <div class="filter-row" role="group" aria-label="Filter projects">
             <button type="button" class="filter-chip is-active" data-project-filter="all" aria-pressed="true">All projects <span>{{ $projects->count() }}</span></button>
-            <button type="button" class="filter-chip" data-project-filter="web-development" aria-pressed="false">Web</button>
-            <button type="button" class="filter-chip" data-project-filter="enterprise-platforms" aria-pressed="false">Platforms</button>
-            <button type="button" class="filter-chip" data-project-filter="mobile-apps" aria-pressed="false">Mobile</button>
+            @foreach (['Web App', 'Mobile App', 'SaaS', 'Enterprise App'] as $category)
+                <button type="button" class="filter-chip" data-project-filter="{{ str($category)->slug() }}" aria-pressed="false">{{ $category }} <span>{{ $projects->where('category', $category)->count() }}</span></button>
+            @endforeach
         </div>
         <div class="project-grid" id="project-grid">
             @forelse ($projects as $project)
@@ -170,3 +170,4 @@
     </div>
 </section>
 @endsection
+

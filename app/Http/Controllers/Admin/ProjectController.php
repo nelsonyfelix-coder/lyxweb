@@ -6,7 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Project;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class ProjectController extends Controller
@@ -23,7 +26,13 @@ class ProjectController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        $project = Project::create($this->validatedData($request));
+        $data = $this->validatedData($request);
+
+        if ($request->hasFile('cover_image')) {
+            $data['cover_image_url'] = $this->storeCoverImage($request);
+        }
+
+        $project = Project::create($data);
 
         return to_route('admin.projects.edit', $project)->with('status', 'Project created.');
     }
@@ -35,14 +44,27 @@ class ProjectController extends Controller
 
     public function update(Request $request, Project $project): RedirectResponse
     {
-        $project->update($this->validatedData($request, $project));
+        $previousImage = $project->cover_image_url;
+        $data = $this->validatedData($request, $project);
+
+        if ($request->hasFile('cover_image')) {
+            $data['cover_image_url'] = $this->storeCoverImage($request);
+        }
+
+        $project->update($data);
+
+        if ($previousImage !== $project->cover_image_url) {
+            $this->deleteStoredCoverImage($previousImage);
+        }
 
         return to_route('admin.projects.edit', $project)->with('status', 'Project updated.');
     }
 
     public function destroy(Project $project): RedirectResponse
     {
+        $coverImage = $project->cover_image_url;
         $project->delete();
+        $this->deleteStoredCoverImage($coverImage);
 
         return to_route('admin.projects.index')->with('status', 'Project deleted.');
     }
@@ -51,16 +73,29 @@ class ProjectController extends Controller
     {
         $data = $request->validate([
             'title' => ['required', 'string', 'max:140'],
-            'category' => ['required', 'string', 'max:80'],
+            'category' => ['required', Rule::in(['Web App', 'Mobile App', 'SaaS', 'Enterprise App'])],
             'short_description' => ['required', 'string', 'max:240'],
             'description' => ['required', 'string', 'max:5000'],
             'tech_stack' => ['nullable', 'string', 'max:500'],
             'live_url' => ['nullable', 'url', 'max:255'],
             'repository_url' => ['nullable', 'url', 'max:255'],
-            'cover_image_url' => ['nullable', 'url', 'max:255'],
+            'cover_image_url' => ['nullable', 'string', 'max:255'],
+            'cover_image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'accent_color' => ['required', 'regex:/^#[0-9A-Fa-f]{6}$/'],
             'sort_order' => ['nullable', 'integer', 'min:0', 'max:65535'],
         ]);
+
+        $imageUrl = trim((string) ($data['cover_image_url'] ?? ''));
+        $isLocalImage = preg_match('#^/(?:storage|images)/[A-Za-z0-9_./-]+$#D', $imageUrl) === 1
+            && ! str_contains($imageUrl, '..');
+        $isRemoteImage = filter_var($imageUrl, FILTER_VALIDATE_URL)
+            && in_array(parse_url($imageUrl, PHP_URL_SCHEME), ['http', 'https'], true);
+
+        if ($imageUrl !== '' && ! $isLocalImage && ! $isRemoteImage) {
+            throw ValidationException::withMessages([
+                'cover_image_url' => 'Enter an http or https image URL, or a local /storage/ or /images/ path.',
+            ]);
+        }
 
         $slugBase = Str::slug($data['title']) ?: 'project';
         $slug = $slugBase;
@@ -88,11 +123,28 @@ class ProjectController extends Controller
             'technologies' => collect(explode(',', $data['tech_stack'] ?? ''))->map(fn ($item) => trim($item))->filter()->values()->all(),
             'live_url' => $data['live_url'] ?? null,
             'repository_url' => $data['repository_url'] ?? null,
-            'cover_image_url' => $data['cover_image_url'] ?? null,
+            'cover_image_url' => $imageUrl !== '' ? $imageUrl : null,
             'accent_color' => $data['accent_color'],
             'is_featured' => $request->boolean('is_featured'),
             'is_published' => $request->boolean('is_published'),
             'sort_order' => $data['sort_order'] ?? 0,
         ];
     }
+
+    private function storeCoverImage(Request $request): string
+    {
+        $path = $request->file('cover_image')->storePublicly('projects', 'public');
+
+        return '/storage/'.$path;
+    }
+
+    private function deleteStoredCoverImage(?string $imageUrl): void
+    {
+        if (! $imageUrl || ! str_starts_with($imageUrl, '/storage/')) {
+            return;
+        }
+
+        Storage::disk('public')->delete(substr($imageUrl, strlen('/storage/')));
+    }
 }
+

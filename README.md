@@ -5,8 +5,10 @@ A Laravel 13 portfolio for Felix Nelsony / Lyxweb Technologies, with an editable
 ## What is included
 
 - Responsive portfolio pages for projects, services, skills, profile details, and enquiries.
-- Project detail pages with search metadata, category filters, and lightweight CSS project artwork when no image is set.
-- Admin workspace at `/admin` for projects, services, skills, profile settings, and contact messages.
+- Project detail pages with search metadata, filters for Web App, Mobile App, SaaS, and Enterprise App, plus optimized preview artwork.
+- Admin workspace at `/admin` for projects, preview image uploads, services, skills, profile settings, and contact messages.
+- A floating WhatsApp contact button using the profile WhatsApp URL or phone number.
+- Project categories are Web App, Mobile App, SaaS, and Enterprise App.
 - Contact form validation, a honeypot, and request throttling. Messages are saved in the database.
 - No frontend CDN dependencies. CSS and the small navigation/filter script are built with Vite.
 - GitHub Actions builds the app on pushes to `main` and can deploy versioned releases to a VPS over SSH.
@@ -110,6 +112,8 @@ php artisan portfolio:make-admin
 
 Run those seed/admin commands only for initial setup. The starter seeder updates the default portfolio records, so rerunning it later would overwrite edits made in the dashboard.
 
+Upload project screenshots from **Admin → Projects → Edit project**. Public uploads are stored under the shared `storage/app/public/projects` directory and served through the `/storage` link. The preloaded SVG previews are lightweight placeholders; replace them with your own project screenshots as you add real work.
+
 ### GitHub Actions secrets
 
 Add these repository secrets under **Settings → Secrets and variables → Actions**:
@@ -137,3 +141,4 @@ Starter profile, projects, services, and skills come from the supplied portfolio
 - Confirm the VPS has PHP 8.4.1+ FPM and the required extensions before the first deploy.
 - Back up the database and `shared/.env` independently of GitHub. Neither is included in deployment artifacts.
 - The workflow keeps previous release directories so the `current` symlink can be pointed back to a prior release if a deployment needs to be rolled back.
+
