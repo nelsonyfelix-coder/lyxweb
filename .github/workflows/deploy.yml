@@ -1,0 +1,114 @@
+name: Build and deploy portfolio
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portfolio-production
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: curl, dom, fileinfo, mbstring, openssl, pdo_mysql, xml
+          coverage: none
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Validate Composer manifest
+        run: composer validate --no-check-publish
+
+      - name: Install production PHP dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --no-progress --optimize-autoloader
+
+      - name: Install and build frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Check PHP syntax
+        run: find app bootstrap config database routes -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Package release
+        run: tar -czf release.tar.gz --exclude=.git --exclude=.env --exclude='.env.*' --exclude=node_modules --exclude=storage --exclude=public/storage .
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: portfolio-release
+          path: release.tar.gz
+          if-no-files-found: error
+          retention-days: 2
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && vars.ENABLE_VPS_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: portfolio-release
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          test -n "$VPS_SSH_KEY" || { echo 'VPS_SSH_KEY is not configured'; exit 1; }
+          test -n "$VPS_KNOWN_HOSTS" || { echo 'VPS_KNOWN_HOSTS is not configured'; exit 1; }
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Upload release to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_APP_PATH: ${{ secrets.VPS_APP_PATH }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          test -n "$VPS_HOST" && test -n "$VPS_PORT" && test -n "$VPS_USER" && test -n "$VPS_APP_PATH" || { echo 'Set VPS_HOST, VPS_PORT, VPS_USER, and VPS_APP_PATH repository secrets'; exit 1; }
+          case "$VPS_APP_PATH" in /*) ;; *) echo 'VPS_APP_PATH must be an absolute path'; exit 1 ;; esac
+          REMOTE="$VPS_USER@$VPS_HOST"
+          ssh -i "$HOME/.ssh/deploy_key" -p "$VPS_PORT" "$REMOTE" "mkdir -p '$VPS_APP_PATH/releases/$RELEASE_SHA' '$VPS_APP_PATH/shared/storage/app/public' '$VPS_APP_PATH/shared/storage/framework/cache/data' '$VPS_APP_PATH/shared/storage/framework/sessions' '$VPS_APP_PATH/shared/storage/framework/views' '$VPS_APP_PATH/shared/storage/logs'"
+          rsync -az --chmod=Du=rwx,Dg=rx,Do=rx,Fu=rw,Fg=r,Fo=r -e "ssh -i $HOME/.ssh/deploy_key -p $VPS_PORT" release.tar.gz "$REMOTE:$VPS_APP_PATH/releases/$RELEASE_SHA/release.tar.gz"
+          ssh -i "$HOME/.ssh/deploy_key" -p "$VPS_PORT" "$REMOTE" bash -s -- "$VPS_APP_PATH" "$RELEASE_SHA" <<'REMOTE'
+          set -Eeuo pipefail
+          app_path="$1"
+          release_sha="$2"
+          release="$app_path/releases/$release_sha"
+          shared="$app_path/shared"
+          test -f "$shared/.env" || { echo 'Missing shared production .env'; exit 1; }
+          tar -xzf "$release/release.tar.gz" -C "$release"
+          rm "$release/release.tar.gz"
+          ln -sfn "$shared/.env" "$release/.env"
+          ln -s "$shared/storage" "$release/storage"
+          cd "$release"
+          php artisan migrate --force
+          php artisan storage:link
+          php artisan optimize
+          ln -sfn "$release" "$app_path/current.next"
+          mv -Tf "$app_path/current.next" "$app_path/current"
+          REMOTE
