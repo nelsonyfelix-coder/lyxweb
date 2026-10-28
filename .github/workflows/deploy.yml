@@ -47,13 +47,13 @@ jobs:
         run: find app bootstrap config database routes -name '*.php' -print0 | xargs -0 -n1 php -l
 
       - name: Package release
-        run: tar -czf release.tar.gz --exclude=.git --exclude=.env --exclude='.env.*' --exclude=node_modules --exclude=storage --exclude=public/storage .
+        run: tar -czf "$RUNNER_TEMP/release.tar.gz" --exclude=.git --exclude=.env --exclude='.env.*' --exclude=node_modules --exclude=storage --exclude=public/storage .
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: portfolio-release
-          path: release.tar.gz
+          path: ${{ runner.temp }}/release.tar.gz
           if-no-files-found: error
           retention-days: 2
 
